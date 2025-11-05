@@ -9,6 +9,7 @@ import plotly.express as px
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
+from pathlib import Path
 
 # =============================
 # 基本配置（根据你的需求）
@@ -28,77 +29,91 @@ st.set_page_config(page_title="房间预定管理（云端部署版）", layout=
 # 数据库引擎：优先 Secrets 的 Postgres；否则本地 SQLite
 # 并包含：连接自检 + 方言区分建表
 # =============================
-@st.cache_resource
+
+@st.cache_resource(show_spinner=False)
 def get_engine():
-    # 1) 构造连接
+    # 1) 构造连接（优先云端 Postgres；无 secrets 则本地 SQLite）
     if "db" in st.secrets:
         s = st.secrets["db"]
+        driver = s.get("driver", "postgresql+pg8000")  # 推荐 pg8000
         url = URL.create(
-            drivername=s.get("driver", "postgresql+psycopg2"),
+            drivername=driver,
             username=s["user"],
             password=s["password"],
             host=s["host"],
-            port=int(s.get("port", "5432")),
+            port=int(str(s.get("port", "6543"))),       # Supabase Pooler 通常 6543
             database=s["database"],
-            query={"sslmode": s.get("sslmode", "require")},
         )
-        engine = create_engine(url, pool_pre_ping=True)
+
+        # 不同驱动的 SSL 传法不一样：
+        connect_args = {}
+        if driver.endswith("+pg8000"):
+            # pg8000 需要 ssl=True；secrets 里的 sslmode 对它不起作用
+            connect_args = {"ssl": True}
+        elif driver.endswith("+psycopg"):
+            # psycopg v3 识别 sslmode
+            connect_args = {"sslmode": s.get("sslmode", "require")}
+
+        engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+
     else:
-        # 本地回退：SQLite（云端不会持久化，不推荐）
+        # 本地回退：SQLite（云端会丢失，仅本地调试用）
         base_dir = Path(__file__).resolve().parent
         data_dir = base_dir / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         engine = create_engine(f"sqlite:///{data_dir / 'bookings.db'}", pool_pre_ping=True)
 
-    # 2) 连接自检（跑通后可注释）
+    # 2) 连接自检（通过则继续；失败就提示并中止）
     try:
         with engine.connect() as c:
             c.execute(text("SELECT 1"))
-        st.sidebar.success(f"✅ 数据库连接正常：{engine.dialect.name}")
+        st.caption(f"✅ 数据库连接正常：{engine.dialect.name} / driver={engine.url.drivername}")
     except Exception as e:
-        st.error("❌ 数据库连接失败：请检查 Secrets 的 host/database/user/password/sslmode 是否正确。")
-        st.caption("提示：Supabase 需要 sslmode=require；密码是 Database Password；段名必须是 [db]。")
+        st.error("❌ 数据库连接失败：请检查 Secrets（driver/host/port/database/user/password/SSL）。")
+        # 打印关键信息帮助排错（不显示密码）
+        if "db" in st.secrets:
+            s = st.secrets["db"]
+            st.caption(f"driver={s.get('driver')} host={s.get('host')} port={s.get('port')} db={s.get('database')} user={s.get('user')}")
         st.stop()
 
-    # 3) 初始化表（方言区分）
+    # 3) 初始化表结构（Postgres/SQLite 兼容）
     with engine.begin() as conn:
-        dialect = engine.dialect.name
-        if dialect == "postgresql":
+        if engine.dialect.name == "postgresql":
             conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bookings(
-                id BIGSERIAL PRIMARY KEY,
-                room TEXT NOT NULL,
-                start_ts TIMESTAMP NOT NULL,
-                end_ts TIMESTAMP NOT NULL,
-                clean_end_ts TIMESTAMP NOT NULL,
-                duration_min INTEGER NOT NULL,
-                customer TEXT,
-                note TEXT,
-                status TEXT DEFAULT 'booked',
-                created_at TIMESTAMP
-            );
+                CREATE TABLE IF NOT EXISTS bookings(
+                    id BIGSERIAL PRIMARY KEY,
+                    room TEXT NOT NULL,
+                    start_ts TIMESTAMP NOT NULL,
+                    end_ts TIMESTAMP NOT NULL,
+                    clean_end_ts TIMESTAMP NOT NULL,
+                    duration_min INTEGER NOT NULL,
+                    customer TEXT,
+                    note TEXT,
+                    status TEXT DEFAULT 'booked',
+                    created_at TIMESTAMP
+                );
             """))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings (room, start_ts);"))
         else:
             conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bookings(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                room TEXT NOT NULL,
-                start_ts TEXT NOT NULL,
-                end_ts TEXT NOT NULL,
-                clean_end_ts TEXT NOT NULL,
-                duration_min INTEGER NOT NULL,
-                customer TEXT,
-                note TEXT,
-                status TEXT DEFAULT 'booked',
-                created_at TEXT
-            );
+                CREATE TABLE IF NOT EXISTS bookings(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL,
+                    start_ts TEXT NOT NULL,
+                    end_ts TEXT NOT NULL,
+                    clean_end_ts TEXT NOT NULL,
+                    duration_min INTEGER NOT NULL,
+                    customer TEXT,
+                    note TEXT,
+                    status TEXT DEFAULT 'booked',
+                    created_at TEXT
+                );
             """))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings (room, start_ts);"))
 
     return engine
 
-
+# 使用
 engine = get_engine()
 
 
