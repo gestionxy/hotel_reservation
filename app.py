@@ -70,9 +70,9 @@ def get_engine():
         st.error("❌ 数据库连接失败：请检查 Secrets（driver/host/port/database/user/password/SSL）。")
         if "db" in st.secrets:
             s = st.secrets["db"]
-            st.caption(f"driver={s.get('driver')} host={s.get('host')} port={s.get('port')} db={s.get('database')} user={s.get('user')}")
+            #st.caption(f"driver={s.get('driver')} host={s.get('host')} port={s.get('port')} db={s.get('database')} user={s.get('user')}")
         # 打印错误类型与简要信息（不包含密码）
-        st.caption(f"hint: {type(e).__name__}: {getattr(e, 'args', [''])[0]}")
+        #st.caption(f"hint: {type(e).__name__}: {getattr(e, 'args', [''])[0]}")
         st.stop()
 
 
