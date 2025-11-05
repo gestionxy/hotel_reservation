@@ -1,0 +1,290 @@
+
+import os
+from pathlib import Path
+from datetime import datetime, date, time, timedelta
+
+import pandas as pd
+import streamlit as st
+
+# Plotly Express for flexible tooltips
+import plotly.express as px
+
+# SQLAlchemy for Postgres/SQLite
+from sqlalchemy import create_engine, text
+
+# --------------------------
+# 配置常量（根据你的新要求）
+# --------------------------
+START_TIME = time(12, 0)
+END_TIME   = time(20, 0)   # 新营业结束时间 20:00
+CLEANING_MIN = 30
+ALLOWED_DURS = [30, 45, 60, 90, 120]
+ROOMS = ["101", "102"]
+
+st.set_page_config(page_title="房间预定管理（GitHub 部署版）", layout="wide")
+
+# --------------------------
+# 数据库：优先 Postgres（通过 secrets），否则本地 SQLite
+# --------------------------
+@st.cache_resource
+def get_engine():
+    # 优先读取 Streamlit secrets（适用于 Streamlit Cloud）
+    if "db" in st.secrets:
+        s = st.secrets["db"]
+        driver = s.get("driver", "postgresql+psycopg2")
+        url = f'{driver}://{s["user"]}:{s["password"]}@{s["host"]}:{s.get("port","5432")}/{s["database"]}'
+        if s.get("sslmode"):
+            url += f'?sslmode={s["sslmode"]}'
+        engine = create_engine(url, pool_pre_ping=True)
+    else:
+        # 本地 SQLite 回退
+        base_dir = Path(__file__).resolve().parent
+        data_dir = base_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        engine = create_engine(f"sqlite:///{data_dir / 'bookings.db'}", pool_pre_ping=True)
+
+    # 初始化表与索引
+    with engine.begin() as conn:
+        conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS bookings(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room TEXT NOT NULL,
+            start_ts TIMESTAMP NOT NULL,
+            end_ts TIMESTAMP NOT NULL,
+            clean_end_ts TIMESTAMP NOT NULL,
+            duration_min INTEGER NOT NULL,
+            customer TEXT,
+            note TEXT,
+            status TEXT DEFAULT 'booked',
+            created_at TIMESTAMP
+        );
+        """))
+        # 兼容 Postgres 自增
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings(room, start_ts);"))
+        except Exception:
+            pass
+    return engine
+
+engine = get_engine()
+
+# --------------------------
+# 工具函数
+# --------------------------
+def combine(d: date, t: time) -> datetime:
+    return datetime.combine(d, t)
+
+def to_ts(dt: datetime):
+    return pd.Timestamp(dt)
+
+def gen_time_slots(start_t: time, end_t: time, step_min: int = 15):
+    base = datetime(2000,1,1, start_t.hour, start_t.minute)
+    end  = datetime(2000,1,1, end_t.hour, end_t.minute)
+    cur = base
+    slots = []
+    while cur <= end:
+        slots.append(cur.strftime("%H:%M"))
+        cur += timedelta(minutes=step_min)
+    return slots
+
+TIME_SLOTS = gen_time_slots(START_TIME, END_TIME, 15)
+
+def within_business(start_dt: datetime, clean_end_dt: datetime) -> bool:
+    # 预约起点 >= 12:00，清洁结束 <= 20:00（同一天）
+    s_ok = START_TIME <= start_dt.time() <= END_TIME
+    e_ok = START_TIME <= clean_end_dt.time() <= END_TIME
+    return (start_dt.date() == clean_end_dt.date()) and s_ok and e_ok
+
+def overlap(a_start, a_end, b_start, b_end) -> bool:
+    return (a_start < b_end) and (b_start < a_end)
+
+def query_between(start_dt: datetime, end_dt: datetime, room: str | None = None):
+    sql = "SELECT * FROM bookings WHERE status='booked' AND start_ts>=:s AND start_ts<:e"
+    params = {"s": start_dt, "e": end_dt}
+    if room:
+        sql += " AND room=:room"
+        params["room"] = room
+    df = pd.read_sql(sql, engine, params=params)
+    if not df.empty:
+        for c in ["start_ts", "end_ts", "clean_end_ts", "created_at"]:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c])
+        df = df.sort_values(["start_ts", "room"])
+    return df
+
+def query_day(d: date, room: str | None = None):
+    d0 = pd.Timestamp(d).normalize()
+    d1 = d0 + pd.Timedelta(days=1)
+    return query_between(d0, d1, room)
+
+def query_upcoming_from_today(room: str | None = None):
+    today0 = pd.Timestamp(date.today()).normalize()
+    far = today0 + pd.Timedelta(days=365*3)
+    return query_between(today0, far, room)
+
+def query_history_before_today():
+    today0 = pd.Timestamp(date.today()).normalize()
+    sql = "SELECT * FROM bookings WHERE status='booked' AND start_ts<:t0"
+    df = pd.read_sql(sql, engine, params={"t0": today0})
+    if not df.empty:
+        for c in ["start_ts", "end_ts", "clean_end_ts", "created_at"]:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c])
+        df = df.sort_values(["start_ts", "room"])
+    return df
+
+def conflicts(room: str, start_dt: datetime, clean_end_dt: datetime, exclude_id: int | None = None):
+    df = query_day(start_dt.date(), room)
+    if df.empty:
+        return df
+    if exclude_id is not None:
+        df = df[df["id"] != exclude_id]
+    mask = df.apply(lambda r: overlap(start_dt, clean_end_dt, r["start_ts"], r["clean_end_ts"]), axis=1)
+    return df[mask]
+
+def insert_booking(room: str, start_dt: datetime, duration_min: int, customer: str, note: str):
+    end_dt = start_dt + timedelta(minutes=duration_min)
+    clean_end_dt = end_dt + timedelta(minutes=CLEANING_MIN)
+
+    # 业务规则
+    if start_dt.date() < date.today():
+        return False, "预约日期必须为今天或之后。"
+    if duration_min not in ALLOWED_DURS:
+        return False, "时长不在允许范围。"
+    if not within_business(start_dt, clean_end_dt):
+        return False, "预约起点需在 12:00 之后，且清洁结束需不晚于 20:00。"
+
+    cfs = conflicts(room, start_dt, clean_end_dt)
+    if not cfs.empty:
+        return False, "与现有预约或清洁冲突。"
+
+    sql = """
+    INSERT INTO bookings(room, start_ts, end_ts, clean_end_ts, duration_min, customer, note, created_at)
+    VALUES (:room, :start_ts, :end_ts, :clean_end_ts, :duration_min, :customer, :note, :created_at)
+    """
+    with engine.begin() as conn:
+        conn.execute(text(sql), dict(
+            room=room,
+            start_ts=start_dt,
+            end_ts=end_dt,
+            clean_end_ts=clean_end_dt,
+            duration_min=int(duration_min),
+            customer=customer,
+            note=note,
+            created_at=datetime.now()
+        ))
+    return True, "创建成功。"
+
+def delete_booking(row_id: int):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE bookings SET status='cancelled' WHERE id=:id"), {"id": row_id})
+
+# --------------------------
+# 页面布局（无侧边栏）
+# --------------------------
+st.markdown("## 🏨 房间预定与空置展示（GitHub/Streamlit Cloud 版）")
+
+# --- 创建预定表单 ---
+st.markdown("### 📋 创建预定")
+col1, col2, col3, col4 = st.columns([1,1,1,2])
+with col1:
+    room = st.selectbox("房间号", ROOMS, index=0)
+with col2:
+    # 预约日期：今天或之后
+    min_date = date.today()
+    book_date = st.date_input("预约日期（≥今天）", value=min_date, min_value=min_date)
+with col3:
+    # 固定 15 分钟档位，从 12:00 到 20:00
+    start_slot = st.selectbox("开始时间（15分钟一档）", TIME_SLOTS, index=0)
+with col4:
+    dur = st.selectbox("预约时长（分钟）", ALLOWED_DURS, index=ALLOWED_DURS.index(60))
+
+col5, col6 = st.columns([1,3])
+with col5:
+    customer = st.text_input("预定人（可空）", value="")
+with col6:
+    note = st.text_input("备注（可空）", value="")
+
+if st.button("✅ 创建预定", use_container_width=False):
+    hh, mm = map(int, start_slot.split(":"))
+    start_dt = datetime.combine(book_date, time(hh, mm))
+    ok, msg = insert_booking(room, start_dt, int(dur), customer.strip(), note.strip())
+    (st.success if ok else st.error)(msg)
+
+st.markdown("---")
+
+# --- 查询与显示：从今天开始的全部预约 + 历史记录 ---
+st.markdown("### 📅 预约记录（从今天开始）")
+df_upcoming = query_upcoming_from_today()
+if df_upcoming.empty:
+    st.info("从今天开始暂无预约记录。")
+else:
+    show = df_upcoming[["id","room","start_ts","end_ts","clean_end_ts","duration_min","customer","note","status"]].copy()
+    show = show.rename(columns={
+        "id":"ID","room":"房间","start_ts":"开始","end_ts":"结束","clean_end_ts":"清洁结束",
+        "duration_min":"时长(分)","customer":"预定人","note":"备注","status":"状态"
+    })
+    st.dataframe(show, use_container_width=True, hide_index=True)
+
+st.markdown("### 🗄️ 历史记录（昨天及更早）")
+with st.expander("展开查看历史记录"):
+    df_hist = query_history_before_today()
+    if df_hist.empty:
+        st.write("无历史记录。")
+    else:
+        show_h = df_hist[["id","room","start_ts","end_ts","clean_end_ts","duration_min","customer","note","status"]].copy()
+        show_h = show_h.rename(columns={
+            "id":"ID","room":"房间","start_ts":"开始","end_ts":"结束","clean_end_ts":"清洁结束",
+            "duration_min":"时长(分)","customer":"预定人","note":"备注","status":"状态"
+        })
+        st.dataframe(show_h, use_container_width=True, hide_index=True)
+
+# --- 撤销操作 ---
+st.markdown("### 🗑️ 撤销预定")
+colx, coly = st.columns([3,1])
+with colx:
+    del_id = st.number_input("输入要撤销的 ID（状态将置为 cancelled）", min_value=0, step=1, value=0)
+with coly:
+    if st.button("撤销"):
+        if del_id > 0:
+            delete_booking(int(del_id))
+            st.success(f"ID {del_id} 已撤销（status=cancelled）。点击右上角 Rerun 刷新。")
+        else:
+            st.error("请输入有效的 ID。")
+
+st.markdown("---")
+
+# --- 时间轴（按天显示，默认当天，范围固定 12:00–20:00） ---
+st.markdown("### ⏱️ 时间轴（按天）")
+day_sel = st.date_input("选择日期（用于时间轴查看）", value=date.today())
+
+df_day = query_day(day_sel)
+# 准备可视化数据（预约段 + 清洁段），并加入 hover 信息
+timeline_rows = []
+if not df_day.empty:
+    for _, r in df_day.iterrows():
+        # 预约段
+        timeline_rows.append(dict(
+            房间=r["room"], 开始=r["start_ts"], 结束=r["end_ts"], 状态="预定",
+            详情=f"预定：{r['start_ts'].strftime('%H:%M')}~{r['end_ts'].strftime('%H:%M')}｜客户：{r['customer'] or ''}｜备注：{r['note'] or ''}｜ID:{r['id']}"
+        ))
+        # 清洁段
+        timeline_rows.append(dict(
+            房间=r["room"], 开始=r["end_ts"], 结束=r["clean_end_ts"], 状态="清洁",
+            详情=f"清洁：{r['end_ts'].strftime('%H:%M')}~{r['clean_end_ts'].strftime('%H:%M')}｜ID:{r['id']}"
+        ))
+
+if timeline_rows:
+    tl_df = pd.DataFrame(timeline_rows)
+    fig = px.timeline(
+        tl_df, x_start="开始", x_end="结束", y="房间", color="状态", hover_data=["详情"],
+        title=f"{day_sel} 时间轴（12:00–20:00）"
+    )
+    # 固定显示范围为 12:00–20:00
+    x0 = combine(day_sel, START_TIME)
+    x1 = combine(day_sel, END_TIME)
+    fig.update_layout(xaxis=dict(range=[x0, x1]))
+    fig.update_yaxes(autorange="reversed")  # timeline 风格
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info(f"{day_sel} 暂无记录。时间轴范围固定为 12:00–20:00。")
