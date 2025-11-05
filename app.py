@@ -45,25 +45,45 @@ def get_engine():
 
     # 初始化表与索引
     with engine.begin() as conn:
-        conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS bookings(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            room TEXT NOT NULL,
-            start_ts TIMESTAMP NOT NULL,
-            end_ts TIMESTAMP NOT NULL,
-            clean_end_ts TIMESTAMP NOT NULL,
-            duration_min INTEGER NOT NULL,
-            customer TEXT,
-            note TEXT,
-            status TEXT DEFAULT 'booked',
-            created_at TIMESTAMP
-        );
-        """))
-        # 兼容 Postgres 自增
-        try:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings(room, start_ts);"))
-        except Exception:
-            pass
+        dialect = engine.dialect.name  # 'postgresql' or 'sqlite', etc.
+
+        if dialect == "postgresql":
+            # ✅ Postgres 版本（兼容 Supabase/Neon）
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS bookings(
+                id BIGSERIAL PRIMARY KEY,
+                room TEXT NOT NULL,
+                start_ts TIMESTAMP NOT NULL,
+                end_ts TIMESTAMP NOT NULL,
+                clean_end_ts TIMESTAMP NOT NULL,
+                duration_min INTEGER NOT NULL,
+                customer TEXT,
+                note TEXT,
+                status TEXT DEFAULT 'booked',
+                created_at TIMESTAMP
+            );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings (room, start_ts);"))
+
+        else:
+            # ✅ SQLite 版本（本地跑）
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS bookings(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room TEXT NOT NULL,
+                start_ts TEXT NOT NULL,
+                end_ts TEXT NOT NULL,
+                clean_end_ts TEXT NOT NULL,
+                duration_min INTEGER NOT NULL,
+                customer TEXT,
+                note TEXT,
+                status TEXT DEFAULT 'booked',
+                created_at TEXT
+            );
+            """))
+            # SQLite 也可以建索引（IF NOT EXISTS 语法没问题）
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bookings_room_start ON bookings (room, start_ts);"))
+
     return engine
 
 engine = get_engine()
