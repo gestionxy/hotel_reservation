@@ -11,7 +11,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+
 
 # =============================
 # 基本配置（根据你的需求）
@@ -174,14 +175,15 @@ def query_upcoming_from_today(room: str | None = None):
 
 def query_history_before_today():
     today0 = pd.Timestamp(date.today()).normalize()
-    sql = "SELECT * FROM bookings WHERE status='booked' AND start_ts<:t0"
-    df = pd.read_sql(sql, engine, params={"t0": today0})
+    sql = "SELECT * FROM bookings WHERE start_ts<:t0 ORDER BY start_ts DESC LIMIT 200"
+    stmt = text(sql)  # ★ 必须：用 text() 包装
+    df = pd.read_sql(stmt, engine, params={"t0": today0})
     if not df.empty:
         for c in ["start_ts", "end_ts", "clean_end_ts", "created_at"]:
             if c in df.columns:
                 df[c] = pd.to_datetime(df[c])
-        df = df.sort_values(["start_ts", "room"])
     return df
+
 
 def conflicts(room: str, start_dt: datetime, clean_end_dt: datetime, exclude_id: int | None = None):
     df = query_day(start_dt.date(), room)
