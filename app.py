@@ -10,6 +10,7 @@ import plotly.express as px
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from pathlib import Path
+import ssl
 
 # =============================
 # 基本配置（根据你的需求）
@@ -51,11 +52,11 @@ def get_engine():
         # 不同驱动的 SSL 传法不一样：
         connect_args = {}
         if driver.endswith("+pg8000"):
-            # pg8000 需要 ssl=True；secrets 里的 sslmode 对它不起作用
-            connect_args = {"ssl": True}
+            # ✅ pg8000 正确的 SSL 写法
+            connect_args = {"ssl_context": ssl.create_default_context()}
         elif driver.endswith("+psycopg"):
-            # psycopg v3 识别 sslmode
             connect_args = {"sslmode": s.get("sslmode", "require")}
+
 
         engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
