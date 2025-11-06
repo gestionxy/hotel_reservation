@@ -4,3 +4,6 @@
 Organization  hotel_reservation
 Project name   reservation
 Database password   Xinya-888
+
+
+https://supabase.com/dashboard/project/jkefdvhhfnxpzlglmnvg/settings/general?showConnect=true&method=session
