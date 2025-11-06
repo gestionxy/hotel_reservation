@@ -40,31 +40,17 @@ def get_engine():
     # 1) 构造连接（优先云端 Postgres；无 secrets 则本地 SQLite）
     if "db" in st.secrets:
         s = st.secrets["db"]
-        driver = s.get("driver", "postgresql+pg8000")  # 推荐 pg8000
+        driver = s.get("driver", "postgresql+psycopg")  # ← 默认走 psycopg
         url = URL.create(
             drivername=driver,
             username=s["user"],
             password=s["password"],
             host=s["host"],
-            port=int(str(s.get("port", "6543"))),       # Supabase Pooler 通常 6543
+            port=int(str(s.get("port", "5432"))),
             database=s["database"],
         )
-
-        # 不同驱动的 SSL 传法不一样：
-        connect_args = {}
-
-
-        if driver.endswith("+pg8000"):
-            ctx = ssl.create_default_context(cafile=certifi.where())
-            # 可选：加强校验（默认就开启主机名校验）
-            ctx.check_hostname = True
-            ctx.verify_mode = ssl.CERT_REQUIRED
-            connect_args = {"ssl_context": ctx}
-        elif driver.endswith("+psycopg"):
-            connect_args = {"sslmode": s.get("sslmode", "require")}
-
-
-
+        # psycopg v3：SSL 用 sslmode 即可
+        connect_args = {"sslmode": s.get("sslmode", "require")}
         engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
     else:
