@@ -25,11 +25,11 @@ START_TIME = time(12, 0)  # 固定 12:00
 END_TIME   = time(20, 0)  # 固定 20:00
 TIME_STEP_MIN = 15        # 15分钟一档
 
-st.set_page_config(page_title="房间预定管理（云端部署版）", layout="wide")
+st.set_page_config(page_title="房间预定管理", layout="wide")
 
-st.write("driver:", st.secrets["db"]["driver"])
-st.write("host:", st.secrets["db"]["host"])
-st.write("user:", st.secrets["db"]["user"])
+#st.write("driver:", st.secrets["db"]["driver"])
+#st.write("host:", st.secrets["db"]["host"])
+#st.write("user:", st.secrets["db"]["user"])
 
 # =============================
 # 数据库引擎：优先 Secrets 的 Postgres；否则本地 SQLite
@@ -235,7 +235,7 @@ def delete_booking(row_id: int):
 # =============================
 # 页面：无侧边栏
 # =============================
-st.markdown("## 🏨 房间预定与空置展示（云端部署版）")
+st.markdown("## 🏨 房间预定管理")
 
 # ---- 创建预定表单 ----
 st.markdown("### 📋 创建预定")
@@ -244,11 +244,11 @@ with col1:
     room = st.selectbox("房间号", ROOMS, index=0)
 with col2:
     min_date = date.today()
-    book_date = st.date_input("预约日期（≥今天）", value=min_date, min_value=min_date)
+    book_date = st.date_input("预约日期", value=min_date, min_value=min_date)
 with col3:
-    start_slot = st.selectbox("开始时间（12:00–20:00，15分钟一档）", gen_time_slots(START_TIME, END_TIME, TIME_STEP_MIN), index=0)
+    start_slot = st.selectbox("开始时间", gen_time_slots(START_TIME, END_TIME, TIME_STEP_MIN), index=0)
 with col4:
-    dur = st.selectbox("预约时长（分钟）", ALLOWED_DURS, index=ALLOWED_DURS.index(60))
+    dur = st.selectbox("预约时长", ALLOWED_DURS, index=ALLOWED_DURS.index(60))
 
 col5, col6 = st.columns([1,3])
 with col5:
@@ -265,7 +265,7 @@ if st.button("✅ 创建预定"):
 st.markdown("---")
 
 # ---- 预约记录（从今天开始） ----
-st.markdown("### 📅 预约记录（从今天开始）")
+st.markdown("### 📅 预约记录")
 df_upcoming = query_upcoming_from_today()
 if df_upcoming.empty:
     st.info("从今天开始暂无预约记录。")
