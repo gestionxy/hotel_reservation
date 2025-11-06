@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from pathlib import Path
 import ssl
+import ssl, certifi  # ← 文件头部确保有这一行
 
 # =============================
 # 基本配置（根据你的需求）
@@ -51,11 +52,17 @@ def get_engine():
 
         # 不同驱动的 SSL 传法不一样：
         connect_args = {}
+
+
         if driver.endswith("+pg8000"):
-            # ✅ pg8000 正确的 SSL 写法
-            connect_args = {"ssl_context": ssl.create_default_context()}
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            # 可选：加强校验（默认就开启主机名校验）
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            connect_args = {"ssl_context": ctx}
         elif driver.endswith("+psycopg"):
             connect_args = {"sslmode": s.get("sslmode", "require")}
+
 
 
         engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
