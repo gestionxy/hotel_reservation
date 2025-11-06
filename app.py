@@ -238,29 +238,64 @@ def delete_booking(row_id: int):
 st.markdown("## 🏨 房间预定管理")
 
 # ---- 创建预定表单 ----
-st.markdown("### 📋 创建预定")
-col1, col2, col3, col4 = st.columns([1,1,1,2])
-with col1:
-    room = st.selectbox("房间号", ROOMS, index=0)
-with col2:
-    min_date = date.today()
-    book_date = st.date_input("预约日期", value=min_date, min_value=min_date)
-with col3:
-    start_slot = st.selectbox("开始时间", gen_time_slots(START_TIME, END_TIME, TIME_STEP_MIN), index=0)
-with col4:
-    dur = st.selectbox("预约时长", ALLOWED_DURS, index=ALLOWED_DURS.index(60))
+# st.markdown("### 📋 创建预定")
+# col1, col2, col3, col4 = st.columns([1,1,1,2])
+# with col1:
+#     room = st.selectbox("房间号", ROOMS, index=0)
+# with col2:
+#     min_date = date.today()
+#     book_date = st.date_input("预约日期", value=min_date, min_value=min_date)
+# with col3:
+#     start_slot = st.selectbox("开始时间", gen_time_slots(START_TIME, END_TIME, TIME_STEP_MIN), index=0)
+# with col4:
+#     dur = st.selectbox("预约时长", ALLOWED_DURS, index=ALLOWED_DURS.index(60))
 
-col5, col6 = st.columns([1,3])
-with col5:
-    customer = st.text_input("预定人（可空）", value="")
-with col6:
-    note = st.text_input("备注（可空）", value="")
+# col5, col6 = st.columns([1,3])
+# with col5:
+#     customer = st.text_input("预定人（可空）", value="")
+# with col6:
+#     note = st.text_input("备注（可空）", value="")
 
-if st.button("✅ 创建预定"):
+# if st.button("✅ 创建预定"):
+#     hh, mm = map(int, start_slot.split(":"))
+#     start_dt = datetime.combine(book_date, time(hh, mm))
+#     ok, msg = insert_booking(room, start_dt, int(dur), customer.strip(), note.strip())
+#     (st.success if ok else st.error)(msg)
+st.markdown("## 🏨 房间预定管理")
+
+# ---- 侧边栏 · 创建预定表单 ----
+st.sidebar.markdown("### 📋 创建预定")
+
+room = st.sidebar.selectbox("房间号", ROOMS, index=0)
+
+min_date = date.today()
+book_date = st.sidebar.date_input("预约日期", value=min_date, min_value=min_date)
+
+start_slot = st.sidebar.selectbox(
+    "开始时间",
+    gen_time_slots(START_TIME, END_TIME, TIME_STEP_MIN),
+    index=0
+)
+
+dur = st.sidebar.selectbox(
+    "预约时长（分钟）",
+    ALLOWED_DURS,
+    index=ALLOWED_DURS.index(60)
+)
+
+customer = st.sidebar.text_input("预定人（可空）", value="")
+note = st.sidebar.text_input("备注（可空）", value="")
+
+if st.sidebar.button("✅ 创建预定", use_container_width=True):
     hh, mm = map(int, start_slot.split(":"))
     start_dt = datetime.combine(book_date, time(hh, mm))
     ok, msg = insert_booking(room, start_dt, int(dur), customer.strip(), note.strip())
-    (st.success if ok else st.error)(msg)
+    (st.sidebar.success if ok else st.sidebar.error)(msg)
+
+
+
+
+
 
 st.markdown("---")
 
