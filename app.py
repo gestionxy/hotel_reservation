@@ -10,8 +10,8 @@ import plotly.express as px
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from pathlib import Path
-import ssl
-import ssl, certifi  # ← 文件头部确保有这一行
+
+from sqlalchemy import text
 
 # =============================
 # 基本配置（根据你的需求）
@@ -144,19 +144,23 @@ def overlap(a_start, a_end, b_start, b_end) -> bool:
     # 半开区间重叠判定
     return (a_start < b_end) and (b_start < a_end)
 
-def query_between(start_dt: datetime, end_dt: datetime, room: str | None = None):
+
+
+def query_between(s, e, room: str | None = None):
+    params = {"s": s, "e": e}
     sql = "SELECT * FROM bookings WHERE status='booked' AND start_ts>=:s AND start_ts<:e"
-    params = {"s": start_dt, "e": end_dt}
     if room:
         sql += " AND room=:room"
         params["room"] = room
-    df = pd.read_sql(sql, engine, params=params)
+
+    stmt = text(sql)  # ← 包成 text()，让 SQLAlchemy 负责绑定 :s/:e/:room
+    df = pd.read_sql(stmt, engine, params=params)
     if not df.empty:
         for c in ["start_ts", "end_ts", "clean_end_ts", "created_at"]:
             if c in df.columns:
                 df[c] = pd.to_datetime(df[c])
-        df = df.sort_values(["start_ts", "room"])
     return df
+
 
 def query_day(d: date, room: str | None = None):
     d0 = pd.Timestamp(d).normalize()
