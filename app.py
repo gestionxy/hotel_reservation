@@ -24,6 +24,9 @@ TIME_STEP_MIN = 15        # 15分钟一档
 
 st.set_page_config(page_title="房间预定管理（云端部署版）", layout="wide")
 
+st.write("driver:", st.secrets["db"]["driver"])
+st.write("host:", st.secrets["db"]["host"])
+st.write("user:", st.secrets["db"]["user"])
 
 # =============================
 # 数据库引擎：优先 Secrets 的 Postgres；否则本地 SQLite
