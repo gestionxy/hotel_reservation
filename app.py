@@ -277,6 +277,19 @@ else:
     })
     st.dataframe(show, use_container_width=True, hide_index=True)
 
+# ---- 撤销 ----
+st.markdown("### 🗑️ 撤销预定")
+colx, coly = st.columns([3,1])
+with colx:
+    del_id = st.number_input("输入要撤销的 ID（状态将置为 cancelled）", min_value=0, step=1, value=0)
+with coly:
+    if st.button("撤销"):
+        if del_id > 0:
+            delete_booking(int(del_id))
+            st.success(f"ID {del_id} 已撤销。点击右上角 Rerun 刷新。")
+        else:
+            st.error("请输入有效的 ID。")
+
 # ---- 历史记录（昨天及更早） ----
 st.markdown("### 🗄️ 历史记录（昨天及更早）")
 with st.expander("展开查看历史记录"):
@@ -291,18 +304,6 @@ with st.expander("展开查看历史记录"):
         })
         st.dataframe(show_h, use_container_width=True, hide_index=True)
 
-# ---- 撤销 ----
-st.markdown("### 🗑️ 撤销预定")
-colx, coly = st.columns([3,1])
-with colx:
-    del_id = st.number_input("输入要撤销的 ID（状态将置为 cancelled）", min_value=0, step=1, value=0)
-with coly:
-    if st.button("撤销"):
-        if del_id > 0:
-            delete_booking(int(del_id))
-            st.success(f"ID {del_id} 已撤销。点击右上角 Rerun 刷新。")
-        else:
-            st.error("请输入有效的 ID。")
 
 st.markdown("---")
 
