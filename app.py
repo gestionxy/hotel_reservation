@@ -73,11 +73,13 @@ def get_engine():
         st.caption(f"✅ 数据库连接正常：{engine.dialect.name} / driver={engine.url.drivername}")
     except Exception as e:
         st.error("❌ 数据库连接失败：请检查 Secrets（driver/host/port/database/user/password/SSL）。")
-        # 打印关键信息帮助排错（不显示密码）
         if "db" in st.secrets:
             s = st.secrets["db"]
             st.caption(f"driver={s.get('driver')} host={s.get('host')} port={s.get('port')} db={s.get('database')} user={s.get('user')}")
+        # 打印错误类型与简要信息（不包含密码）
+        st.caption(f"hint: {type(e).__name__}: {getattr(e, 'args', [''])[0]}")
         st.stop()
+
 
     # 3) 初始化表结构（Postgres/SQLite 兼容）
     with engine.begin() as conn:
